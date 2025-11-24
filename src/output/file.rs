@@ -49,20 +49,36 @@ impl Write for File {
 }
 
 impl File {
-    pub fn new(args: &Args) -> Result<Option<Self>> {
+    pub fn new(args: &Args, channel: &str) -> Result<Option<Self>> {
         let Some(path) = &args.path else {
             return Ok(None);
         };
 
-        info!("Recording to: {path}");
+        // Generate timestamp (e.g., "2025-11-24_15-30-45")
+        let timestamp = chrono::Local::now().format("%Y-%m-%d_%H-%M-%S").to_string();
+        
+        // Insert channel and timestamp before file extension
+        let file_path = if let Some(dot_pos) = path.rfind('.') {
+            format!(
+                "{}_{}_{}{}",
+                &path[..dot_pos],
+                channel,
+                timestamp,
+                &path[dot_pos..]
+            )
+        } else {
+            format!("{}_{}_{}",path, channel, timestamp)
+        };
+
+        info!("Recording to: {}", file_path);
         if args.overwrite {
             return Ok(Some(Self {
-                file: fs::File::create(path)?,
+                file: fs::File::create(&file_path)?,
             }));
         }
 
         Ok(Some(Self {
-            file: fs::File::create_new(path)?,
+            file: fs::File::create_new(&file_path)?,
         }))
     }
 }

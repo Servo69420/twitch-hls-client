@@ -64,6 +64,7 @@ fn main() -> Result<()> {
         debug!("\n{main_args:#?}\n{http_args:#?}\n{hls_args:#?}\n{output_args:#?}");
 
         let agent = Agent::new(http_args);
+        let channel = hls_args.channel.clone();
         let conn = match Stream::new(hls_args, &agent) {
             Ok(Stream::Variant(conn)) => conn,
             Ok(Stream::Passthrough(url)) => {
@@ -77,7 +78,7 @@ fn main() -> Result<()> {
             Err(e) => return Err(e),
         };
 
-        (Writer::new(&output_args)?, Playlist::new(conn)?, agent)
+        (Writer::new(&output_args, &channel)?, Playlist::new(conn)?, agent)
     };
 
     let error = main_loop(writer, playlist, &agent).expect_err("Main loop returned Ok");

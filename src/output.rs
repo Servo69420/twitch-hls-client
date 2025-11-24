@@ -4,7 +4,7 @@ mod tcp;
 
 pub use player::{Player, PlayerClosedError};
 
-use std::io::{self, Write};
+use std::{io::{self, Write}, sync::mpsc::channel};
 
 use anyhow::{Result, ensure};
 use log::{debug, info};
@@ -93,12 +93,12 @@ impl Write for Writer {
 }
 
 impl Writer {
-    pub fn new(args: &Args) -> Result<Self> {
+    pub fn new(args: &Args, channel: &str) -> Result<Self> {
         let mut writer = Self::default();
 
         writer.add_output(Player::new(&args.player)?);
         writer.add_output(Tcp::new(&args.tcp)?);
-        writer.add_output(File::new(&args.file)?);
+        writer.add_output(File::new(&args.file, channel)?);
 
         ensure!(!writer.outputs.is_empty(), "No output configured");
 

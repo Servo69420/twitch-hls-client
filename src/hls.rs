@@ -43,7 +43,7 @@ pub struct Args {
     use_cache_only: bool,
     write_cache_only: bool,
     force_playlist_url: Option<Url>,
-    channel: String,
+    pub channel: String,
     quality: Option<String>,
 }
 
