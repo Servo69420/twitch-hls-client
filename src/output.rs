@@ -4,7 +4,10 @@ mod tcp;
 
 pub use player::{Player, PlayerClosedError};
 
-use std::{io::{self, Write}, sync::mpsc::channel};
+use std::{
+    io::{self, Write},
+    sync::mpsc::channel,
+};
 
 use anyhow::{Result, ensure};
 use log::{debug, info};

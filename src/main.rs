@@ -78,7 +78,11 @@ fn main() -> Result<()> {
             Err(e) => return Err(e),
         };
 
-        (Writer::new(&output_args, &channel)?, Playlist::new(conn)?, agent)
+        (
+            Writer::new(&output_args, &channel)?,
+            Playlist::new(conn)?,
+            agent,
+        )
     };
 
     let error = main_loop(writer, playlist, &agent).expect_err("Main loop returned Ok");

@@ -1,10 +1,11 @@
 use std::{
     fs,
-    io::{self, Write},
+    io::{self, ErrorKind, Write},
+    path::{Path, PathBuf},
 };
 
 use anyhow::Result;
-use log::info;
+use log::{debug, info};
 
 use super::Output;
 use crate::args::{Parse, Parser};
@@ -25,12 +26,18 @@ impl Parse for Args {
 }
 
 pub struct File {
-    file: fs::File,
+    base_path: PathBuf,
+    channel: String,
+    overwrite: bool,
+    header: Option<Vec<u8>>,
+    current: Option<fs::File>,
+    segment_index: u64,
 }
 
 impl Output for File {
     fn set_header(&mut self, header: &[u8]) -> io::Result<()> {
-        self.file.write_all(header)
+        self.header = Some(header.to_vec());
+        Ok(())
     }
 }
 
@@ -40,11 +47,20 @@ impl Write for File {
     }
 
     fn flush(&mut self) -> io::Result<()> {
-        self.file.flush()
+        if let Some(file) = self.current.as_mut() {
+            file.flush()?;
+        }
+
+        self.current = None;
+        Ok(())
     }
 
     fn write_all(&mut self, buf: &[u8]) -> io::Result<()> {
-        self.file.write_all(buf)
+        self.ensure_file()?;
+        self.current
+            .as_mut()
+            .expect("File handle missing after ensure_file")
+            .write_all(buf)
     }
 }
 
@@ -54,31 +70,100 @@ impl File {
             return Ok(None);
         };
 
-        // Generate timestamp (e.g., "2025-11-24_15-30-45")
-        let timestamp = chrono::Local::now().format("%Y-%m-%d_%H-%M-%S").to_string();
-        
-        // Insert channel and timestamp before file extension
-        let file_path = if let Some(dot_pos) = path.rfind('.') {
-            format!(
-                "{}_{}_{}{}",
-                &path[..dot_pos],
-                channel,
-                timestamp,
-                &path[dot_pos..]
-            )
-        } else {
-            format!("{}_{}_{}",path, channel, timestamp)
-        };
-
-        info!("Recording to: {}", file_path);
-        if args.overwrite {
-            return Ok(Some(Self {
-                file: fs::File::create(&file_path)?,
-            }));
-        }
+        info!("Recording segments to: {path}");
 
         Ok(Some(Self {
-            file: fs::File::create_new(&file_path)?,
+            base_path: PathBuf::from(path),
+            channel: channel.to_owned(),
+            overwrite: args.overwrite,
+            header: None,
+            current: None,
+            segment_index: 0,
         }))
+    }
+
+    fn ensure_file(&mut self) -> io::Result<()> {
+        if self.current.is_some() {
+            return Ok(());
+        }
+
+        self.current = Some(self.create_segment_file()?);
+        Ok(())
+    }
+
+    fn create_segment_file(&mut self) -> io::Result<fs::File> {
+        let timestamp = Self::timestamp();
+        let mut attempt = 0;
+
+        loop {
+            let index = self.segment_index + attempt;
+            let path = self.segment_path(&timestamp, index);
+
+            let result = if self.overwrite {
+                fs::File::create(&path)
+            } else {
+                fs::File::create_new(&path)
+            };
+
+            match result {
+                Ok(mut file) => {
+                    if let Some(header) = &self.header {
+                        file.write_all(header)?;
+                    }
+
+                    if self.segment_index == 0 && attempt == 0 {
+                        info!("Recording to: {}", path.display());
+                    } else {
+                        debug!("Recording to: {}", path.display());
+                    }
+
+                    self.segment_index = index.saturating_add(1);
+                    return Ok(file);
+                }
+                Err(error) if !self.overwrite && error.kind() == ErrorKind::AlreadyExists => {
+                    attempt = attempt.saturating_add(1);
+                    continue;
+                }
+                Err(error) => return Err(error),
+            }
+        }
+    }
+
+    fn segment_path(&self, timestamp: &str, index: u64) -> PathBuf {
+        let (stem, ext) = Self::split_stem_ext(&self.base_path);
+        let mut filename = format!("{stem}_{}_{}_{index:05}", self.channel, timestamp);
+        filename.push('.');
+        filename.push_str(&ext);
+
+        if let Some(parent) = self
+            .base_path
+            .parent()
+            .filter(|p| !p.as_os_str().is_empty())
+        {
+            parent.join(filename)
+        } else {
+            PathBuf::from(filename)
+        }
+    }
+
+    fn split_stem_ext(path: &Path) -> (String, String) {
+        let stem = path
+            .file_stem()
+            .or_else(|| path.file_name())
+            .map(|s| s.to_string_lossy().into_owned())
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| "recording".to_owned());
+
+        let ext = path
+            .extension()
+            .map(|e| e.to_string_lossy().into_owned())
+            .filter(|e| !e.is_empty())
+            .unwrap_or_else(|| "ts".to_owned());
+
+        (stem, ext)
+    }
+
+    fn timestamp() -> String {
+        chrono::Local::now().format("%Y-%m-%d_%H-%M-%S").to_string()
     }
 }
